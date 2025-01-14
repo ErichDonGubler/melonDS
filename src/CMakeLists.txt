@@ -97,8 +97,15 @@ if (ENABLE_JIT)
 
         ARMJIT.cpp
         ARMJIT_Memory.cpp
+        ARMJIT_Global.cpp
 
         dolphin/CommonFuncs.cpp)
+    
+    if (WIN32)
+        # Required for memory mapping-related functions introduced in Windows 8
+        target_compile_definitions(core PRIVATE -D_WIN32_WINNT=_WIN32_WINNT_WIN8)
+        target_link_libraries(core PRIVATE onecore)
+    endif()
 
     if (ARCHITECTURE STREQUAL x86_64)
         target_sources(core PRIVATE
@@ -127,12 +134,26 @@ if (ENABLE_JIT)
     endif()
 endif()
 
+target_include_directories(core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+
 set(MELONDS_VERSION_SUFFIX "$ENV{MELONDS_VERSION_SUFFIX}" CACHE STRING "Suffix to add to displayed melonDS version")
+option(MELONDS_EMBED_BUILD_INFO "Embed detailed build info into the binary" OFF)
+set(MELONDS_GIT_BRANCH "$ENV{MELONDS_GIT_BRANCH}" CACHE STRING "The Git branch used for this build")
+set(MELONDS_GIT_HASH "$ENV{MELONDS_GIT_HASH}" CACHE STRING "The hash of the Git commit")
+set(MELONDS_BUILD_PROVIDER "$ENV{MELONDS_BUILD_PROVIDER}" CACHE STRING "The name of the provider of this build")
+
+if (MELONDS_EMBED_BUILD_INFO)
+    target_compile_definitions(core PUBLIC MELONDS_EMBED_BUILD_INFO)
+    if (NOT MELONDS_GIT_BRANCH OR NOT MELONDS_GIT_HASH OR NOT MELONDS_BUILD_PROVIDER)
+        message(FATAL_ERROR "When embedding build information, all fields must be filled out. See src/CMakeLists.txt.")
+    endif()
+endif()
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 target_sources(core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 target_include_directories(core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
 
+set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(teakra EXCLUDE_FROM_ALL)
 # Workaround for building teakra with -O0 on Windows either failing or hanging forever
 target_compile_options(teakra PRIVATE "$<$<CONFIG:DEBUG>:-Og>")
@@ -140,7 +161,9 @@ target_link_libraries(core PRIVATE teakra)
 
 if (NOT MSVC)
     # MSVC has its own compiler flag syntax; if we ever support it,
-    # be sure to silence any equivalent warnings there.
+    # be sure to add equivalent flags here.
+
+    target_compile_options(core PUBLIC -fwrapv)
 
     target_compile_options(core PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>")
     # These warnings are excessive, and are only triggered in the ARMJIT code
@@ -164,13 +187,14 @@ endif()
 
 if (WIN32)
     target_link_libraries(core PRIVATE ole32 comctl32 wsock32 ws2_32)
+    target_compile_definitions(core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
 elseif(NOT APPLE AND NOT HAIKU)
     check_library_exists(rt shm_open "" NEED_LIBRT)
     if (NEED_LIBRT)
         target_link_libraries(core PRIVATE rt)
     endif()
 elseif(HAIKU)
-	target_link_libraries(core PRIVATE network)
+    target_link_libraries(core PRIVATE network)
 endif()
 
 if (ENABLE_JIT_PROFILING)
